@@ -3,96 +3,147 @@ module Calculator exposing (..)
 import Char exposing (isDigit)
 inputs : List String
 inputs = [
-  "1 + 1",
-  "5 - 2",
-  "2 * 4",
-  "9 / 3",
+  -- "1 + 1",
+  -- "5 - 2",
+  "3 * 7",
+  "5 * 3 * 2",
+  -- "9 / 3",
   "12 + 45",
-  "45 / 982 + 123",
+  -- "45 / 982 + 123",
   "4 * 5 + 8",
-  "4 + 5 * 8",
-  "123"]
+  "4 + 5 * 8"
+  -- "123"
+  ]
 
 evaluate : String -> String
 evaluate =
   tokenize >>
   parse >>
-  displayResult
+  eval >>
+  toString
 
-type Expr =
-  Number Int |
-  BinaryOperation OpType1 Expr Expr
-  -- BinaryOperation2 OpType2 Expr Expr
+eval : Result String (Expr, List Token) -> Int
+eval result =
+  case result of
+    Ok (term, []) -> evalExpr term
+    _ -> -999
 
-type alias ParserResult = Result String Expr
+-- Grammar
+--
+-- Expr -> Expr + Term | Term
+-- Term -> Term * Factor | Factor
+-- F -> Number
+--
+-- Expr -> Term Expr_
+-- Expr_ -> + Term Expr_ | Epsilon
+-- Term -> Factor Term_
+-- Term_ -> * Factor Term_ | Epsilon
+-- Factor -> ( Expr ) | ID | Number
 
-displayResult : ParserResult -> String
-displayResult parserResult =
-  case parserResult of
-    Ok expr -> toString (eval expr)
-    Err err -> err
+-- type NodeType = Expr | Expr2 | Term | Term2 | Factor | Expr3 | Number Int
 
-eval : Expr -> Int
-eval expr =
-  case expr of
-    Number n -> n
-    BinaryOperation op expr1 expr2 ->
-      case op of
-        -- Plus -> (eval expr1) + (eval expr2)
-        -- Minus -> (eval expr1) - (eval expr2)
-        Times -> (eval expr1) * (eval expr2)
-        Divide -> (round ((toFloat (eval expr1)) / (toFloat (eval expr2))))
+type Expr = Expr Term Expr_
+type Expr_ = Expr_PlusTerm Term Expr_ | Expr_Epsilon
+type Term = Term Factor Term_
+type Term_ = Term_TimesFactor Factor Term_ | Term_Epsilon
+type Factor = FactorParenthesized Expr | FactorNumber Int
 
-
-parse : List Token -> ParserResult
+parse : List Token -> Result String (Expr, List Token)
 parse = parseExpr
 
-parseExpr : List Token -> ParserResult
+parseExpr : List Token -> Result String (Expr, List Token)
 parseExpr tokens =
-  case parseBinaryOperator1 tokens of
-    Ok binOp -> Ok binOp
-    Err _ -> parseNumber tokens
+  case parseTerm tokens of
+    Ok (term, moreTokens) ->
+      case parseExpr_ moreTokens of
+        Ok (expr_, moreTokens) -> Ok (Expr term expr_, moreTokens)
+        Err err -> Err err
+    Err err -> Err err
 
-parseBinaryOperator1 : List Token -> ParserResult
-parseBinaryOperator1 tokens =
+parseExpr_ : List Token -> Result String (Expr_, List Token)
+parseExpr_ tokens =
   case tokens of
-    (NumToken num1)::(OpToken1 op)::[NumToken num2] ->
-      Ok (BinaryOperation op (Number num1) (Number num2))
-    (NumToken num1)::(OpToken1 op1)::NumToken num2::(OpToken1 op2)::more ->
-      case parseExpr more of
-        Ok rhs ->
-          let lhs = BinaryOperation op1 (Number num1) (Number num2)
-          in Ok (BinaryOperation op2 lhs rhs)
-        Err err -> Err "Fail in parseBinaryOperator1"
-    _ -> Err "Fail in parseBinaryOperator1"
+    PlusToken::moreTokens ->
+      case parseTerm moreTokens of
+        Ok (term, yetMoreTokens) ->
+          case parseExpr_ yetMoreTokens of
+            Ok (expr_, yetYetMoreTokens) ->
+              Ok (Expr_PlusTerm term expr_, yetYetMoreTokens)
+            Err err -> Err err
+        Err err -> Err err
+    _ -> Ok (Expr_Epsilon, tokens)
 
--- parseBinaryOperator2 : List Token -> ParserResult
--- parseBinaryOperator2 tokens =
---   case tokens of
---     (NumToken num1)::(OpToken2 op)::[NumToken num2] ->
---       Ok (BinaryOperation op (Number num1) (Number num2))
---     (NumToken num1)::(OpToken2 op1)::NumToken num2::(OpToken2 op2)::more ->
---       case parseExpr more of
---         Ok rhs ->
---           let lhs = BinaryOperation2 op1 (Number num1) (Number num2)
---           in Ok (BinaryOperation2 op2 lhs rhs)
---         Err err -> Err "Fail in parseBinaryOperator2"
---     _ -> Err "Fail in parseBinaryOperator2"
+parseTerm : List Token -> Result String (Term, List Token)
+parseTerm tokens =
+  case parseFactor tokens of
+    Ok (factor, moreTokens) ->
+      case parseTerm_ moreTokens of
+        Ok (term_, yetMoreTokens) -> Ok (Term factor term_, yetMoreTokens)
+        Err err -> Err err
+    Err err -> Err err
 
-parseNumber : List Token -> ParserResult
-parseNumber tokens =
+parseFactor : List Token -> Result String (Factor, List Token)
+parseFactor tokens =
   case tokens of
-    [NumToken num] -> Ok (Number num)
-    _ -> Err "Fail in parser_number"
+    (NumToken num)::moreTokens -> Ok (FactorNumber num, moreTokens)
+    _ -> Err "Not a factor"
+
+parseTerm_ : List Token -> Result String (Term_, List Token)
+parseTerm_ tokens =
+  case tokens of
+    TimesToken::moreTokens ->
+      case parseFactor moreTokens of
+        Ok (factor, yetMoreTokens) ->
+          case parseTerm_ yetMoreTokens of
+            Ok (term_, yetYetMoreTokens) ->
+              Ok (Term_TimesFactor factor term_, yetYetMoreTokens)
+            Err err -> Err err
+        Err err -> Err err
+    _ -> Ok (Term_Epsilon, tokens)
+
+-- displayResult : ParserResult -> String
+-- displayResult parserResult =
+--   case parserResult of
+--     Ok expr -> toString (eval expr)
+--     Err err -> err
+
+evalExpr : Expr -> Int
+evalExpr expr =
+  case expr of
+    Expr term expr_ -> evalExpr_ (evalTerm term) expr_
+
+evalExpr_ : Int -> Expr_ -> Int
+evalExpr_ num expr_ =
+  case expr_ of
+    Expr_Epsilon -> num
+    Expr_PlusTerm term expr_2 -> evalExpr_ ((evalTerm term) + num) expr_2
+
+evalTerm : Term -> Int
+evalTerm term =
+  case term of
+    Term factor term_ -> evalTerm_ (evalFactor factor) term_
+
+evalTerm_ : Int -> Term_ -> Int
+evalTerm_ num term_ =
+  case term_ of
+    Term_Epsilon -> num
+    Term_TimesFactor factor term_2 -> evalTerm_ ((evalFactor factor) * num) term_2
+
+evalFactor : Factor -> Int
+evalFactor factor =
+  case factor of
+    FactorNumber num -> num
+    _ -> -999
 
 type Token =
-  OpToken1 OpType1 |
-  OpToken2 OpType2 |
+  PlusToken |
+  MinusToken |
+  TimesToken |
+  DivideToken |
   NumToken Int |
   ErrToken String
 
-type OpType1 = Times | Divide
-type OpType2 = Plus | Minus
+type OpType = Times | Divide | Plus | Minus
 
 type State = Open | CollectingDigits
 
@@ -107,12 +158,12 @@ accumulateToken chr (state, tokenList) =
         Err err -> (Open, ErrToken err :: tokenList)
     else
       case chr of
-        -- '+' -> (Open, OpToken1 Plus :: tokenList)
-        -- '-' -> (Open, OpToken1 Minus :: tokenList)
-        '*' -> (Open, OpToken1 Times :: tokenList)
-        '/' -> (Open, OpToken1 Divide :: tokenList)
+        '+' -> (Open, PlusToken :: tokenList)
+        '-' -> (Open, MinusToken :: tokenList)
+        '*' -> (Open, TimesToken :: tokenList)
+        '/' -> (Open, DivideToken :: tokenList)
         _ -> (Open, ErrToken
-          ("Unknown OpToken1 " ++ (String.fromChar chr)) :: tokenList)
+          ("Unknown OpToken " ++ (String.fromChar chr)) :: tokenList)
   else if state == CollectingDigits then
     if isDigit chr then
       case (String.toInt (String.fromChar chr)) of
@@ -124,12 +175,12 @@ accumulateToken chr (state, tokenList) =
         Err err -> (Open, ErrToken err :: tokenList)
     else
       case chr of
-        -- '+' -> (Open, OpToken1 Plus :: tokenList)
-        -- '-' -> (Open, OpToken1 Minus :: tokenList)
-        '*' -> (Open, OpToken1 Times :: tokenList)
-        '/' -> (Open, OpToken1 Divide :: tokenList)
+        '+' -> (Open, PlusToken :: tokenList)
+        '-' -> (Open, MinusToken :: tokenList)
+        '*' -> (Open, TimesToken :: tokenList)
+        '/' -> (Open, DivideToken :: tokenList)
         _ -> (Open, ErrToken
-          ("Unknown OpToken1 " ++ (String.fromChar chr)) :: tokenList)
+          ("Unknown OpToken " ++ (String.fromChar chr)) :: tokenList)
   else
     (state, tokenList)
 

@@ -1,0 +1,6 @@
+1. Use monad's map or flatMap instead of handling errors on each turn.
+2. maybe evalTerm_ and evalExpr_ don't have to take a number as parameter
+3. Implement - and /
+4. Implement parenthesis
+6. Improve error handling
+5. Implement variables
